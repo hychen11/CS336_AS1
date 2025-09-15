@@ -560,32 +560,173 @@ def get_tokenizer(
     """
     raise NotImplementedError
 
-
-def run_train_bpe(
-    input_path: str | os.PathLike,
-    vocab_size: int,
-    special_tokens: list[str],
-    **kwargs,
-) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-    """Given the path to an input corpus, run train a BPE tokenizer and
-    output its vocabulary and merges.
-
-    Args:
-        input_path (str | os.PathLike): Path to BPE tokenizer training data.
-        vocab_size (int): Total number of items in the tokenizer's vocabulary (including special tokens).
-        special_tokens (list[str]): A list of string special tokens to be added to the tokenizer vocabulary.
-            These strings will never be split into multiple tokens, and will always be
-            kept as a single token. If these special tokens occur in the `input_path`,
-            they are treated as any other string.
-
-    Returns:
-        tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-            vocab:
-                The trained tokenizer vocabulary, a mapping from int (token ID in the vocabulary)
-                to bytes (token bytes)
-            merges:
-                BPE merges. Each list item is a tuple of bytes (<token1>, <token2>),
-                representing that <token1> was merged with <token2>.
-                Merges are ordered by order of creation.
+def find_chunk_boundaries(
+    file: BinaryIO,
+    desired_num_chunks: int,
+    split_special_token: bytes,
+) -> list[int]:
     """
-    raise NotImplementedError
+    Chunk the file into parts that can be counted independently.
+    May return fewer chunks if the boundaries end up overlapping.
+    """
+    assert isinstance(split_special_token, bytes), "Must represent special token as a bytestring"
+
+    # Get total file size in bytes
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+
+    chunk_size = file_size // desired_num_chunks
+
+    # Initial guesses for chunk boundary locations, uniformly spaced
+    # Chunks start on previous index, don't include last index
+    chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
+    chunk_boundaries[-1] = file_size
+
+    mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+
+    for bi in range(1, len(chunk_boundaries) - 1):
+        initial_position = chunk_boundaries[bi]
+        file.seek(initial_position)  # Start at boundary guess
+        while True:
+            mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
+
+            # If EOF, this boundary should be at the end of the file
+            if mini_chunk == b"":
+                chunk_boundaries[bi] = file_size
+                break
+
+            # Find the special token in the mini chunk
+            found_at = mini_chunk.find(split_special_token)
+            if found_at != -1:
+                chunk_boundaries[bi] = initial_position + found_at
+                break
+            initial_position += mini_chunk_size
+
+    # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
+    return sorted(set(chunk_boundaries))
+
+
+def process_chunk(chunk: tuple[int], 
+                  input_path: str, 
+                  special_tokens: list[str]) -> Counter:
+    """
+    Process each chunk of the file and update the vocabulary counter.
+    """
+    start, end = chunk
+    special_tokens_pattern = '|'.join(special_tokens)
+    # special_tokens_pattern = "|".join(map(re.escape, special_tokens))
+    chunk_counter = Counter()
+    with open(input_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+        # 2.1 在预分词前移除特殊标记
+        for segment in re.split(special_tokens_pattern, chunk):
+            # 3. 预分词(pre-tokenization)
+            # finditer return一个匹配对象的迭代器
+            for match in re.finditer(PAT, segment):
+                # match.group()返回匹配到的字符串
+                if match.group():
+                    # chunk_counter.update([...]) means add these bytes into counter
+                    chunk_counter.update([tuple(bytes([b]) for b in match.group().encode('utf-8'))])
+    return chunk_counter
+
+
+import regex as re
+from collections import defaultdict, Counter
+import heapq
+from priority_dict import PriorityDict
+
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+def run_train_bpe(input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str], **kwargs):
+    num_processes = 4
+    vocab = {i: bytes([i]) for i in range(256)}
+    next_token_id = 256
+    for st in special_tokens:
+        vocab[next_token_id] = st.encode("utf-8")
+        next_token_id += 1
+
+    merges = []
+    vocab_counter = Counter()
+
+    with open(input_path, "rb") as f:
+        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+        for start, end in zip(boundaries[:-1], boundaries[1:]):
+            vocab_counter.update(process_chunk((start, end), input_path, special_tokens))
+
+    # Initialize pair frequencies and indices
+    pair_freq = PriorityDict()
+    pair_indices = defaultdict(set)
+
+    for symbol, freq in vocab_counter.items():
+        for i in range(len(symbol) - 1):
+            pair = (symbol[i], symbol[i+1])
+            pair_freq[pair] += freq  # use negative freq for max-heap
+            pair_indices[pair].add(symbol)
+
+    def merge(symbol: tuple[bytes], pair: tuple[bytes]):
+        new_symbol = []
+        i = 0
+        n = len(symbol)
+        while i < n:
+            if i < n - 1 and symbol[i] == pair[0] and symbol[i + 1] == pair[1]:
+                new_symbol.append(pair[0] + pair[1])
+                i += 2
+            else:
+                new_symbol.append(symbol[i])
+                i += 1
+        return tuple(new_symbol)
+
+    def update_freq(old_symbol: tuple[bytes], new_symbol: tuple[bytes], freq: int):
+        # remove old pairs
+        for i in range(len(old_symbol) - 1):
+            old_pair = (old_symbol[i], old_symbol[i + 1])
+            pair_freq[old_pair] -= freq  # add back
+            if old_pair in pair_indices:
+                pair_indices[old_pair].discard(old_symbol)
+                if not pair_indices[old_pair]:
+                    del pair_indices[old_pair]
+
+        # add new pairs
+        for i in range(len(new_symbol) - 1):
+            new_pair = (new_symbol[i], new_symbol[i + 1])
+            pair_freq[new_pair] += freq
+            pair_indices[new_pair].add(new_symbol)
+
+    try:
+        best, _ = pair_freq.pop()
+    except KeyError:
+        best = None
+
+    while best is not None and len(vocab) < vocab_size:
+        symbols = pair_indices.pop(best, set())
+        
+        # new_vocab = {}
+        # del_keys = set()
+        
+        for symbol in symbols:
+            freq = vocab_counter[symbol]
+            new_symbol = merge(symbol, best)
+            update_freq(symbol, new_symbol, freq)
+            
+            # new_vocab[new_symbol] = freq
+            # del_keys.add(symbol)
+            
+            vocab_counter[new_symbol] = freq
+            del vocab_counter[symbol]
+
+        # vocab_counter.update(new_vocab)
+        # for k in del_keys:
+        #     del vocab_counter[k]
+            
+        vocab[next_token_id] = best[0] + best[1]
+        next_token_id += 1
+        merges.append(best)
+
+        try:
+            best, _ = pair_freq.pop()
+        except KeyError:
+            break
+
+    return vocab, merges
