@@ -14,7 +14,7 @@ import torch
 from torch import Tensor
 
 from cs336_basics.BPETokenizer import BPETokenizer
-from cs336_basics.Transformer import Linear, Embedding, RMSNorm
+from cs336_basics.Transformer import Linear, Embedding, RMSNorm, SwiGLU
 
 
 def run_linear(
@@ -89,10 +89,11 @@ def run_swiglu(
     # If your state dict keys match, you can use `load_state_dict()`
     # swiglu.load_state_dict(weights)
     # You can also manually assign the weights
-    # swiglu.w1.weight.data = w1_weight
-    # swiglu.w2.weight.data = w2_weight
-    # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = SwiGLU(d_model, d_ff)
+    swiglu.w1.weight.data = w1_weight
+    swiglu.w2.weight.data = w2_weight
+    swiglu.w3.weight.data = w3_weight
+    return swiglu.forward(in_features)
 
 
 def run_scaled_dot_product_attention(

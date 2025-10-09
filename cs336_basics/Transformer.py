@@ -92,3 +92,27 @@ class RMSNorm(nn.Module):
         result = x/mean_square * self.weight
         # Return the result in the original dtype
         return result.to(in_dtype)
+
+
+class SwiGLU(nn.Module):
+    def __init__(self, d_model: int, d_ff: int, device=None, dtype=None):
+        super().__init__()
+        self.d_model = d_model
+        self.d_ff = (d_ff + 63) // 64 * 64
+        self.device = device
+        self.dtype = dtype
+        # Linear(d_in, d_out)
+        self.w1 = Linear(self.d_model, self.d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(self.d_ff, self.d_model, device=device, dtype=dtype)
+        self.w3 = Linear(self.d_model, self.d_ff, device=device, dtype=dtype)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Process an input tensor of shape (batch_size, sequence_length, d_model) 
+        and return a tensor of the same shape.
+        """
+        swish = self.w1.forward(x)
+        silu = swish * torch.sigmoid(swish)
+        gate = self.w3.forward(x)
+        out = silu * gate
+        return self.w2.forward(out)

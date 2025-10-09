@@ -75,6 +75,29 @@ PyTorch 中 `.data` 直接操作张量，不会触发梯度计算。
 
 **所以原来的初始化就没有作用了**，因为被新的 `weights` 覆盖了
 
+# Linear
+
+W (d_out,d_in)
+
+X (1,d_in)
+
+$Y=xW^T$
+
+# SwiGLU
+
+`FFN(x) = SwiGLU(x, W1, W2, W3) = W2(SiLU(W1x) * W3x)`
+
+`SiLU(x) = x * σ(x)`
+
+```python
+# element-wise
+c = a * b  
+# matrix multiplication
+d = a @ b  
+```
+
+You should set $d_{ff}$ to approximately 8/3 × d_model in your implementation, while ensuring that the dimensionality of the inner feed-forward layer is a multiple of 64 to make good use of your hardware.
+
 # einops
 
 ### einsum
