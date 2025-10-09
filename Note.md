@@ -67,13 +67,13 @@ Embeddnig
 nn.init.trunc_normal_(self.weight, mean=0, std=1, a=-3*1, b=3*1)
 ```
 
+RMSNorm 1
 
+这里 `linear.weight.data = weights` 是**直接用外部给定的权重覆盖初始化的权重**。
 
+PyTorch 中 `.data` 直接操作张量，不会触发梯度计算。
 
-
-
-
-
+**所以原来的初始化就没有作用了**，因为被新的 `weights` 覆盖了
 
 # einops
 
