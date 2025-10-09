@@ -1,4 +1,8 @@
 from __future__ import annotations
+from priority_dict import PriorityDict
+import heapq
+from collections import defaultdict, Counter
+import regex as re
 
 import os
 from typing import IO, Any, BinaryIO
@@ -10,7 +14,8 @@ import torch
 from torch import Tensor
 
 from cs336_basics.BPETokenizer import BPETokenizer
-from cs336_basics.Transformer import Linear,Embedding
+from cs336_basics.Transformer import Linear, Embedding, RMSNorm
+
 
 def run_linear(
     d_in: int,
@@ -26,7 +31,7 @@ def run_linear(
         out_dim (int): The size of the output dimension
         weights (Float[Tensor, "d_out d_in"]): The linear weights to use
         in_features (Float[Tensor, "... d_in"]): The output tensor to apply the function to
-    
+
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
@@ -49,7 +54,7 @@ def run_embedding(
         d_model (int): The size of the embedding dimension
         weights (Float[Tensor, "vocab_size d_model"]): The embedding vectors to fetch from
         token_ids (Int[Tensor, "..."]): The set of token ids to fetch from the Embedding layer
-    
+
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
@@ -382,7 +387,9 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    rmsNorm = RMSNorm(d_model, eps)
+    rmsNorm.weight.data = weights
+    return rmsNorm.forward(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -563,6 +570,7 @@ def get_tokenizer(
     """
     return BPETokenizer(vocab, merges, special_tokens)
 
+
 def find_chunk_boundaries(
     file: BinaryIO,
     desired_num_chunks: int,
@@ -572,7 +580,8 @@ def find_chunk_boundaries(
     Chunk the file into parts that can be counted independently.
     May return fewer chunks if the boundaries end up overlapping.
     """
-    assert isinstance(split_special_token, bytes), "Must represent special token as a bytestring"
+    assert isinstance(split_special_token,
+                      bytes), "Must represent special token as a bytestring"
 
     # Get total file size in bytes
     file.seek(0, os.SEEK_END)
@@ -610,8 +619,8 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-def process_chunk(chunk: tuple[int], 
-                  input_path: str, 
+def process_chunk(chunk: tuple[int],
+                  input_path: str,
                   special_tokens: list[str]) -> Counter:
     """
     Process each chunk of the file and update the vocabulary counter.
@@ -631,16 +640,13 @@ def process_chunk(chunk: tuple[int],
                 # match.group()返回匹配到的字符串
                 if match.group():
                     # chunk_counter.update([...]) means add these bytes into counter
-                    chunk_counter.update([tuple(bytes([b]) for b in match.group().encode('utf-8'))])
+                    chunk_counter.update(
+                        [tuple(bytes([b]) for b in match.group().encode('utf-8'))])
     return chunk_counter
 
 
-import regex as re
-from collections import defaultdict, Counter
-import heapq
-from priority_dict import PriorityDict
-
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
 
 def run_train_bpe(
     input_path: str | os.PathLike,
@@ -682,7 +688,8 @@ def run_train_bpe(
     with open(input_path, "rb") as f:
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
         for start, end in zip(boundaries[:-1], boundaries[1:]):
-            vocab_counter.update(process_chunk((start, end), input_path, special_tokens))
+            vocab_counter.update(process_chunk(
+                (start, end), input_path, special_tokens))
 
     # Initialize pair frequencies and indices
     pair_freq = PriorityDict()
@@ -727,25 +734,25 @@ def run_train_bpe(
 
     while best is not None and len(vocab) < vocab_size:
         symbols = pair_indices.pop(best, set())
-        
+
         # new_vocab = {}
         # del_keys = set()
-        
+
         for symbol in symbols:
             freq = vocab_counter[symbol]
             new_symbol = merge(symbol, best)
             update_freq(symbol, new_symbol, freq)
-            
+
             # new_vocab[new_symbol] = freq
             # del_keys.add(symbol)
-            
+
             vocab_counter[new_symbol] = freq
             del vocab_counter[symbol]
 
         # vocab_counter.update(new_vocab)
         # for k in del_keys:
         #     del vocab_counter[k]
-            
+
         vocab[next_token_id] = best[0] + best[1]
         next_token_id += 1
         merges.append(best)

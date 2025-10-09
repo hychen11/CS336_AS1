@@ -100,5 +100,11 @@ images, dim_by,
 )
 ```
 
+### aggregate
+
+```python
+einops.reduce(tensor, "pattern_in -> pattern_out", reduction="sum|mean|max|...")
+```
+
 
 
