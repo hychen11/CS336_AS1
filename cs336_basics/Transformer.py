@@ -116,3 +116,66 @@ class SwiGLU(nn.Module):
         gate = self.w3.forward(x)
         out = silu * gate
         return self.w2.forward(out)
+
+
+class RotaryPositionalEmbedding(nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        """
+        Construct the RoPE module and create buffers if needed.
+        theta: float Θ value for the RoPE
+        d_k: int dimension of query and key vectors
+        max_seq_len: int Maximum sequence length that will be inputted
+        device: torch.device | None = None Device to store the buffer on
+        """
+        super().__init__()
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+        self.device = device
+
+        # dimension is d_k/2
+        freqs = 1/(theta**(torch.arange(0, d_k, 2, device=device)/d_k))
+        position_ids = torch.arange(
+            0, max_seq_len, 1, dtype=torch.float32, device=device)  # dimension is seq_len
+
+        freqs = torch.outer(position_ids, freqs)  # {seq_len,d_k/2}
+
+        sin_freqs = torch.sin(freqs)
+        cos_freqs = torch.cos(freqs)
+
+        self.register_buffer(
+            "cos_freqs", cos_freqs.to(device), persistent=False)
+        self.register_buffer(
+            "sin_freqs", sin_freqs.to(device), persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        """
+        Process an input tensor of shape (..., seq_len, d_k) and return a tensor of the same shape. Note
+        that you should tolerate x with an arbitrary number of batch dimensions. You should assume
+        that the token positions are a tensor of shape (..., seq_len) specifying the token positions of
+        x along the sequence dimension.
+        """
+        seq_len, d_k = x.shape[-2:]
+        x_pairs = einops.rearrange(
+            x, "... seq_len (pairs two) -> ... seq_len pairs two", two=2)
+
+        x_real = x_pairs[..., 0]
+        x_imag = x_pairs[..., 1]
+
+        # token position (..., seq_len)
+        cos_freqs = self.cos_freqs[token_positions]  # (..., seq_len, pairs)
+        sin_freqs = self.sin_freqs[token_positions]
+        # insert a dimension at position 1 (for num_heads)
+        # (..., num_heads, seq_len, pairs)
+        cos_freqs = cos_freqs.unsqueeze(-3)  # (..., 1, seq_len, pairs)
+        sin_freqs = sin_freqs.unsqueeze(-3)  # (..., 1, seq_len, pairs)
+
+        rotated_real = x_real * cos_freqs - x_imag * sin_freqs
+        rotated_imag = x_real * sin_freqs + x_imag * cos_freqs
+
+        x_pairs = torch.stack([rotated_real, rotated_imag], dim=-1)
+
+        rotated_x = einops.rearrange(
+            x_pairs, "... seq_len pairs two -> ... seq_len (pairs two)", two=2)
+
+        return rotated_x

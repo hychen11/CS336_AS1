@@ -98,6 +98,27 @@ d = a @ b
 
 You should set $d_{ff}$ to approximately 8/3 × d_model in your implementation, while ensuring that the dimensionality of the inner feed-forward layer is a multiple of 64 to make good use of your hardware.
 
+# Rope
+
+```python
+torch.arange(start=0, end, step=1, *, dtype=None, device=None)
+```
+
+$\theta_{i,k}=\frac{i}{\theta^{2k/d}}$
+
+```python
+freq = (torch.arange(0, d_k, 2, device=device)/d_k) # dimension is d_k/2
+position_ids = torch.arange( 0, max_seq_len, 1, dtype=torch.float32, device=device) #seq_len
+torch.outer(position_ids,freqs) #torch.outer(input, other, *, out=None) (len(input), len(other))(len(input), len(other))
+```
+
+```python
+x_pairs = torch.stack([rotated_real, rotated_imag], dim=-1)
+# 两个张量沿着 最后一维 (-1) 拼成一个新的维度
+```
+
+`dim = 0` 也就是在第1个维度上拼接
+
 # einops
 
 ### einsum
