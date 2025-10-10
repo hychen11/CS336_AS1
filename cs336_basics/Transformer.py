@@ -208,3 +208,54 @@ def scaled_dot_product_attention(Q: torch.Tensor, K: torch.Tensor, V: torch.Tens
     attention = einops.einsum(
         res, V, "... seq_len_q seq_len_k, ... seq_len_k d_v -> ... seq_len_q d_v")
     return attention
+
+
+class MultiheadSelfAttention(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, theta: float | None = None, max_seq_len: int | None = None, token_positions: torch.Tensor | None = None, device=None, dtype=None):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.device = device
+        self.dtype = dtype
+        self.theta = theta
+        self.max_seq_len = max_seq_len
+        self.token_positions = token_positions
+        self.d_k = self.d_v = d_model // num_heads
+
+        if theta is not None:
+            self.rope = RotaryPositionalEmbedding(
+                theta, self.d_k, max_seq_len, device=device)
+        else:
+            self.rope = None
+
+        self.q = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.k = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.v = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.o = Linear(d_model, d_model, device=device, dtype=dtype)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        Q = self.q(x)
+        K = self.k(x)
+        V = self.v(x)
+
+        Q = einops.rearrange(
+            Q, "batch_size seq_len (num_heads d_k)->batch_size num_heads seq_len d_k", num_heads=self.num_heads)
+        K = einops.rearrange(
+            K, "batch_size seq_len (num_heads d_k)->batch_size num_heads seq_len d_k", num_heads=self.num_heads)
+        V = einops.rearrange(
+            V, "batch_size seq_len (num_heads d_k)->batch_size num_heads seq_len d_k", num_heads=self.num_heads)
+
+        if self.theta is not None:
+            assert self.token_positions is not None, "token_positions must be provided if theta is not None"
+            Q = self.rope.forward(Q, self.token_positions)
+            K = self.rope.forward(K, self.token_positions)
+
+        batch_size, num_heads, seq_len = Q.shape[0], Q.shape[1], Q.shape[2]
+
+        mask = ~torch.triu(torch.ones(batch_size, num_heads, seq_len,
+                           seq_len, device=Q.device, dtype=torch.bool), diagonal=1)
+
+        attention = scaled_dot_product_attention(Q, K, V, mask)
+        attention = einops.rearrange(
+            attention, "batch_size num_heads seq_len d_k->batch_size seq_len (num_heads d_k)")
+        return self.o(attention)
