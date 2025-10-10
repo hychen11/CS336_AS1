@@ -186,3 +186,25 @@ def softmax(v: torch.Tensor, dim: int):
     maxv = torch.max(v, dim=dim, keepdim=True).values
     v_exp = torch.exp(v-maxv)
     return v_exp/torch.sum(v_exp, dim=dim, keepdim=True)
+
+
+def scaled_dot_product_attention(Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+    """
+    keys and queries of shape (batch_size, ..., seq_len, d_k) 
+    values of shape (batch_size, ..., seq_len, d_v)
+    Optional mask: True should collectively sum to 1, and the attention probabilities of positions with a mask value of False should be zero.
+
+    output with the shape (batch_size, ..., d_v)
+    """
+    batch_size = Q.shape[0]
+    seq_len, d_k = Q.shape[-2:]
+    d_v = V.shape[-1]
+    mid = einops.einsum(
+        Q, K, " ... seq_len_q d_k, ... seq_len_k d_k -> ... seq_len_q seq_len_k")
+    if mask is not None:
+        mid = mid.masked_fill(~mask, float("-inf"))
+    mid = mid/(d_k**0.5)
+    res = softmax(mid, dim=-1)
+    attention = einops.einsum(
+        res, V, "... seq_len_q seq_len_k, ... seq_len_k d_v -> ... seq_len_q d_v")
+    return attention
