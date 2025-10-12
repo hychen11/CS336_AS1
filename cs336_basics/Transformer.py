@@ -60,6 +60,7 @@ class Embedding(nn.Module):
         return self.weight[token_ids]
 
 
+# llama layer norm : RMSNorm
 class RMSNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
         """
@@ -76,6 +77,7 @@ class RMSNorm(nn.Module):
         self.dtype = dtype
         self.weight = nn.Parameter(torch.empty(
             d_model, device=device, dtype=dtype))
+        # 这里的nn.init.ones_() 就是把公式里的g初始化成1
         nn.init.ones_(self.weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -179,7 +181,6 @@ class RotaryPositionalEmbedding(nn.Module):
             x_pairs, "... seq_len pairs two -> ... seq_len (pairs two)", two=2)
 
         return rotated_x
-
 
 def softmax(v: torch.Tensor, dim: int):
     # dim=i means compute at last dim

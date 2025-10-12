@@ -324,6 +324,14 @@ class RotaryPositionalEmbedding(nn.Module):
         return rotated_x
 ```
 
+注意这里torch.stack([rotated_real, rotated_imag], dim=-1) 不同于 torch.cat
+这里再dim =-1就是最后一个维度上进行叠加
+
+注意这里已经把输入x拆成 $x_{2i}$ 和 $x_{2i+1}$，然后直接和rotation matrix矩阵计算！最后输出得到 (seq_len, d_k) 大小的输出
+
+`einops.rearrange` 作用：改变张量的形状或维度顺序，不会创建新的值，只是重排已有张量。注意，`einops用的是rearrange` 而只有torch才有arange！用于生成一个长序列！
+
+此外这里rearrange 里不能用d_k/2这种！只能变量名，并且不能直接用2 表示维度，需要用一个变量，再在外面赋值才可以，比如 `einops.rearrange(x,"... (seq two) -> ... seq two", two = 2)`! 可以，`einops.rearrange(x,"... (seq 2) -> ... seq 2)` 不行
 
 
 # einops
