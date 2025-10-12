@@ -14,7 +14,7 @@ import torch
 from torch import Tensor
 
 from cs336_basics.BPETokenizer import BPETokenizer
-from cs336_basics.Transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, softmax, scaled_dot_product_attention, MultiheadSelfAttention
+from cs336_basics.Transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, softmax, scaled_dot_product_attention, MultiheadSelfAttention, TransformerBlock
 
 
 def run_linear(
@@ -295,8 +295,28 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    # Generate token positions for the sequence
+    batch_size, seq_len = in_features.shape[0], in_features.shape[1]
+    token_positions = torch.arange(seq_len, device=in_features.device).unsqueeze(0).expand(batch_size, -1)
+    
+    
+    transformerBlock = TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta)
+    
+    transformerBlock.attn.q.weight.data = weights["attn.q_proj.weight"]
+    transformerBlock.attn.k.weight.data = weights["attn.k_proj.weight"]
+    transformerBlock.attn.v.weight.data = weights["attn.v_proj.weight"]
+    transformerBlock.attn.o.weight.data = weights["attn.output_proj.weight"]
+    
+    transformerBlock.ln1.weight.data = weights["ln1.weight"]
+    transformerBlock.ln2.weight.data = weights["ln2.weight"]
+    
+    transformerBlock.ffn.w1.weight.data = weights["ffn.w1.weight"]
+    transformerBlock.ffn.w2.weight.data = weights["ffn.w2.weight"]
+    transformerBlock.ffn.w3.weight.data = weights["ffn.w3.weight"]
+    
+    return transformerBlock.forward(in_features, token_positions)
 
+   
 
 def run_transformer_lm(
     vocab_size: int,

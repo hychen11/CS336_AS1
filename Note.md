@@ -236,7 +236,8 @@ c = a * b
 # matrix multiplication
 d = a @ b  
 ```
-
+# positionwise_feedforward
+这里的$d_{ff}$是feed forward的隐藏层
 You should set $d_{ff}$ to approximately 8/3 × d_model in your implementation, while ensuring that the dimensionality of the inner feed-forward layer is a multiple of 64 to make good use of your hardware.
 
 # Rope
@@ -333,6 +334,13 @@ class RotaryPositionalEmbedding(nn.Module):
 
 此外这里rearrange 里不能用d_k/2这种！只能变量名，并且不能直接用2 表示维度，需要用一个变量，再在外面赋值才可以，比如 `einops.rearrange(x,"... (seq two) -> ... seq two", two = 2)`! 可以，`einops.rearrange(x,"... (seq 2) -> ... seq 2)` 不行
 
+
+# TransformerBlock
+这里是使用了preNorm 相比于postNorm更加稳定，适合深层网络
+```python
+    y = x + MultiHeadSelfAttention(RMSNorm(x))
+    z = y + FFN(RMSNorm(y))
+```
 
 # einops
 

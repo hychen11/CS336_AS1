@@ -1,4 +1,6 @@
 
+import token
+from turtle import forward
 from typing import List, Dict, Tuple
 from collections import Counter, deque
 from torch import nn
@@ -182,6 +184,7 @@ class RotaryPositionalEmbedding(nn.Module):
 
         return rotated_x
 
+
 def softmax(v: torch.Tensor, dim: int):
     # dim=i means compute at last dim
     maxv = torch.max(v, dim=dim, keepdim=True).values
@@ -260,3 +263,37 @@ class MultiheadSelfAttention(nn.Module):
         attention = einops.rearrange(
             attention, "batch_size num_heads seq_len d_k->batch_size seq_len (num_heads d_k)")
         return self.o(attention)
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, max_seq_len: int, theta: float, device=None, dtype=None):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+        self.device = device
+        self.dtype = dtype
+
+        self.ln1 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.ln2 = RMSNorm(d_model, device=device, dtype=dtype)
+
+        token_positions = torch.zeros((1, max_seq_len), dtype=torch.long)
+        self.attn = MultiheadSelfAttention(
+            d_model, num_heads, theta, max_seq_len, token_positions, device=device, dtype=dtype)
+
+        self.ffn = SwiGLU(d_model, d_ff, device=device, dtype=dtype)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
+        if token_positions is None:
+            batch_size, seq_len = x.shape[0], x.shape[1]
+            token_positions = torch.arange(
+                seq_len, device=x.device).unsqueeze(0).expand(batch_size, -1)
+
+        # Update attention's token positions
+        self.attn.token_positions = token_positions
+
+        y = x + self.attn(self.ln1(x))
+        z = y + self.ffn(self.ln2(y))
+        return z
