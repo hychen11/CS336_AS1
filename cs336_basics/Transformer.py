@@ -1,6 +1,5 @@
 
 import token
-from turtle import forward
 from typing import List, Dict, Tuple
 from collections import Counter, deque
 from torch import nn
@@ -338,3 +337,31 @@ class TransformerLm(nn.Module):
         y = self.ln_final(y)
         logits = self.lm_head(y)
         return logits
+
+
+def cross_entropy(inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """
+    inputs (Float[Tensor, "batch_size vocab_size"]): inputs[i][j] is the
+            unnormalized logit of jth class for the ith example.
+    targets (Int[Tensor, "batch_size"]): Tensor of shape (batch_size,) with the index of the correct class.
+            Each value must be between 0 and `num_classes - 1`.
+
+    Returns:
+        Float[Tensor, ""]: The average cross-entropy loss across examples.
+    """
+    batch_size, vocab_size = inputs.shape
+
+    largest_ele = torch.max(inputs, dim=-1, keepdim=True).values
+    x_shift = inputs - largest_ele
+    inputs_exp = torch.exp(x_shift)
+    log_sum_exp = torch.log(torch.sum(inputs_exp, dim=-1, keepdim=True))
+    log_softmax = x_shift - log_sum_exp
+
+    # this is log_softmax! which is x-log(sum(exp(x)))!!!!!!!!
+    target_prob = log_softmax[torch.arange(batch_size), targets]
+    """
+    this is advanced indexing, 
+    c[a,b] 相当于输入两个维度相同的a,b c[a[i]][b[i]]
+    """
+    logits = torch.mean(-target_prob)
+    return logits

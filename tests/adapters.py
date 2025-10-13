@@ -14,7 +14,7 @@ import torch
 from torch import Tensor
 
 from cs336_basics.BPETokenizer import BPETokenizer
-from cs336_basics.Transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, softmax, scaled_dot_product_attention, MultiheadSelfAttention, TransformerBlock, TransformerLm
+from cs336_basics.Transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, softmax, scaled_dot_product_attention, MultiheadSelfAttention, TransformerBlock, TransformerLm, cross_entropy
 
 
 def run_linear(
@@ -297,26 +297,26 @@ def run_transformer_block(
     """
     # Generate token positions for the sequence
     batch_size, seq_len = in_features.shape[0], in_features.shape[1]
-    token_positions = torch.arange(seq_len, device=in_features.device).unsqueeze(0).expand(batch_size, -1)
-    
-    
-    transformerBlock = TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta)
-    
+    token_positions = torch.arange(
+        seq_len, device=in_features.device).unsqueeze(0).expand(batch_size, -1)
+
+    transformerBlock = TransformerBlock(
+        d_model, num_heads, d_ff, max_seq_len, theta)
+
     transformerBlock.attn.q.weight.data = weights["attn.q_proj.weight"]
     transformerBlock.attn.k.weight.data = weights["attn.k_proj.weight"]
     transformerBlock.attn.v.weight.data = weights["attn.v_proj.weight"]
     transformerBlock.attn.o.weight.data = weights["attn.output_proj.weight"]
-    
+
     transformerBlock.ln1.weight.data = weights["ln1.weight"]
     transformerBlock.ln2.weight.data = weights["ln2.weight"]
-    
+
     transformerBlock.ffn.w1.weight.data = weights["ffn.w1.weight"]
     transformerBlock.ffn.w2.weight.data = weights["ffn.w2.weight"]
     transformerBlock.ffn.w3.weight.data = weights["ffn.w3.weight"]
-    
+
     return transformerBlock.forward(in_features, token_positions)
 
-   
 
 def run_transformer_lm(
     vocab_size: int,
@@ -397,28 +397,29 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    model = TransformerLm(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta)
-    
+    model = TransformerLm(vocab_size, context_length,
+                          d_model, num_layers, num_heads, d_ff, rope_theta)
+
     model.token_embeddings.weight.data = weights["token_embeddings.weight"]
-    
+
     for layer_idx in range(num_layers):
         layer = model.layers[layer_idx]
-        
+
         layer.attn.q.weight.data = weights[f"layers.{layer_idx}.attn.q_proj.weight"]
         layer.attn.k.weight.data = weights[f"layers.{layer_idx}.attn.k_proj.weight"]
         layer.attn.v.weight.data = weights[f"layers.{layer_idx}.attn.v_proj.weight"]
         layer.attn.o.weight.data = weights[f"layers.{layer_idx}.attn.output_proj.weight"]
-        
-        layer.ln1.weight.data =  weights[f"layers.{layer_idx}.ln1.weight"]
-        layer.ln2.weight.data =  weights[f"layers.{layer_idx}.ln2.weight"]
-        
-        layer.ffn.w1.weight.data =  weights[f"layers.{layer_idx}.ffn.w1.weight"]
-        layer.ffn.w2.weight.data =  weights[f"layers.{layer_idx}.ffn.w2.weight"]    
-        layer.ffn.w3.weight.data =  weights[f"layers.{layer_idx}.ffn.w3.weight"]
-        
+
+        layer.ln1.weight.data = weights[f"layers.{layer_idx}.ln1.weight"]
+        layer.ln2.weight.data = weights[f"layers.{layer_idx}.ln2.weight"]
+
+        layer.ffn.w1.weight.data = weights[f"layers.{layer_idx}.ffn.w1.weight"]
+        layer.ffn.w2.weight.data = weights[f"layers.{layer_idx}.ffn.w2.weight"]
+        layer.ffn.w3.weight.data = weights[f"layers.{layer_idx}.ffn.w3.weight"]
+
     model.ln_final.weight.data = weights["ln_final.weight"]
     model.lm_head.weight.data = weights["lm_head.weight"]
-    
+
     return model(in_indices)
 
 
@@ -513,7 +514,7 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    return cross_entropy(inputs, targets)
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
