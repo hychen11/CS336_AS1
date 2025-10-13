@@ -14,7 +14,7 @@ import torch
 from torch import Tensor
 
 from cs336_basics.BPETokenizer import BPETokenizer
-from cs336_basics.Transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, softmax, scaled_dot_product_attention, MultiheadSelfAttention, TransformerBlock
+from cs336_basics.Transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, softmax, scaled_dot_product_attention, MultiheadSelfAttention, TransformerBlock, TransformerLm
 
 
 def run_linear(
@@ -397,7 +397,29 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    model = TransformerLm(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta)
+    
+    model.token_embeddings.weight.data = weights["token_embeddings.weight"]
+    
+    for layer_idx in range(num_layers):
+        layer = model.layers[layer_idx]
+        
+        layer.attn.q.weight.data = weights[f"layers.{layer_idx}.attn.q_proj.weight"]
+        layer.attn.k.weight.data = weights[f"layers.{layer_idx}.attn.k_proj.weight"]
+        layer.attn.v.weight.data = weights[f"layers.{layer_idx}.attn.v_proj.weight"]
+        layer.attn.o.weight.data = weights[f"layers.{layer_idx}.attn.output_proj.weight"]
+        
+        layer.ln1.weight.data =  weights[f"layers.{layer_idx}.ln1.weight"]
+        layer.ln2.weight.data =  weights[f"layers.{layer_idx}.ln2.weight"]
+        
+        layer.ffn.w1.weight.data =  weights[f"layers.{layer_idx}.ffn.w1.weight"]
+        layer.ffn.w2.weight.data =  weights[f"layers.{layer_idx}.ffn.w2.weight"]    
+        layer.ffn.w3.weight.data =  weights[f"layers.{layer_idx}.ffn.w3.weight"]
+        
+    model.ln_final.weight.data = weights["ln_final.weight"]
+    model.lm_head.weight.data = weights["lm_head.weight"]
+    
+    return model(in_indices)
 
 
 def run_rmsnorm(
