@@ -342,6 +342,91 @@ class RotaryPositionalEmbedding(nn.Module):
     z = y + FFN(RMSNorm(y))
 ```
 
+# AdamW
+
+```python
+def step(self, closure: Optional[Callable] = None):
+    loss = None
+    if closure is not None:
+        loss = closure()
+        
+    """
+    这里closure就是一个计算loss的函数
+    有些优化算法（比如 LBFGS）在一次 step 中需要多次计算 loss 和梯度。
+		普通 SGD：只需要一次 loss.backward() 就能更新 → 不需要 closure。
+		LBFGS：可能要多次尝试不同的参数更新方向，每次都要重新 forward/backward → 需要 closure 来重新算 loss。
+    """
+def closure():
+    optimizer.zero_grad()       # 清梯度
+    output = model(data)        # forward
+    loss = loss_fn(output, target)
+    loss.backward()             # backward
+    return loss
+```
+
+在 PyTorch 里，所有优化器都继承自 `torch.optim.Optimizer`。
+ 这个基类提供了一个 **`self.state` 字典** 来帮你保存每个参数的额外信息。
+
+- `self.state` 是一个 **字典**，键是参数对象 (`nn.Parameter`)，值也是一个字典。
+- 每个参数都可能需要存储一些状态（state），比如：
+  - **SGD**：可能存储 momentum buffer（动量）
+  - **AdamW**：需要存储一阶矩 `m` 和二阶矩 `v`
+
+```
+self.state[param] = {
+    "step": 0,      # 迭代步数
+    "exp_avg": m,   # 一阶矩
+    "exp_avg_sq": v # 二阶矩
+}
+```
+
+在 PyTorch 的 `Optimizer` 里，有一个属性`self.param_groups`，是一个 **列表**，每个元素是一个 **字典**，里面包含一组参数和这组参数对应的超参数，这里每一层相当于不同layer的参数，然后params里存的就是一个 layer 的 **权重张量或偏置张量**
+
+`p` = 一个 layer 的 **权重张量或偏置张量**
+
+`p.grad` = 这个参数在反向传播时累积的梯度
+
+`grad = p.grad.data` 就是取出 **实际的梯度数值**，用来更新 `p.data`（参数本身的值）
+
+```java
+[
+    {
+        "params": [param_tensor1, param_tensor2, ...],
+        "lr": 1e-3,
+        "betas": (0.9, 0.999),
+        "eps": 1e-8,
+        "weight_decay": 0.01
+    },
+    {
+        "params": [param_tensor3, param_tensor4, ...],
+        "lr": 5e-4,
+        "betas": (0.95, 0.999),
+        "eps": 1e-8,
+        "weight_decay": 0.0
+    }
+]
+```
+
+所以这里就是遍历每一层
+
+```python
+# θ ←θ −αt m√v+ε (Update the parameters) 先更新
+# θ ←θ −αλθ (Apply weight decay)  后衰减
+```
+
+其实顺序不影响最终数学意义上的收敛，因为：
+
+- 衰减是 $(1 - \alpha\lambda)\theta$，一个乘法
+- 更新是加法
+
+两者是线性可交换的（你可以先更新，再衰减）。
+
+**但 PyTorch、Transformers 等库里都实现成“先衰减再更新”**，主要是为了：
+
+1. **实现简单** —— 先做衰减（in-place 乘），再做 addcdiv 就行。
+2. **保证一致性** —— 避免 bias correction 里混入 weight decay 影响。
+3. **历史习惯** —— AdamW 论文里写的是先衰减再更新，框架都沿用了。
+
 # einops
 
 ### einsum
@@ -363,7 +448,7 @@ dimmed_images = images_rearr * dim_value
 ## Or in one go:
 dimmed_images = einsum(
 images, dim_by,
-"batch height width channel, dim_value -> batch dim_value height width channel"
+	"batch height width channel, dim_value -> batch dim_value height width channel"
 )
 ```
 
@@ -373,5 +458,21 @@ images, dim_by,
 einops.reduce(tensor, "pattern_in -> pattern_out", reduction="sum|mean|max|...")
 ```
 
+# Pytorch inplace
 
+`_` means in place operation
+
+```python
+tensor.mul_(value)
+# tensor=tensor∗value
+
+tensor.add_(other, alpha=1.0)
+# tensor=tensor+α∗other
+
+tensor.addcmul_(tensor1, tensor2, value=1.0)
+# tensor=tensor+value∗(tensor1∗tensor2)
+
+tensor.addcdiv_(tensor1, tensor2, value=-step_size)
+# tensor=tensor+value∗(tensor1/tensor2)
+```
 
