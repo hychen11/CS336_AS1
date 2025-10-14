@@ -427,6 +427,24 @@ self.state[param] = {
 2. **保证一致性** —— 避免 bias correction 里混入 weight decay 影响。
 3. **历史习惯** —— AdamW 论文里写的是先衰减再更新，框架都沿用了。
 
+# gradient clipping
+
+ℓ₂-norm  **Euclidean norm**
+$$
+||x||_2=\sqrt{\Sigma x_i^2}
+$$
+这里先计算每个parameter的grad的L2 norm，然后再平方求和再开方！
+
+```python
+import torch
+
+x = torch.tensor([3.0, 4.0])
+l2_norm = torch.norm(x, p=2)   # 默认就是 p=2
+print(l2_norm)  # tensor(5.)
+```
+
+
+
 # einops
 
 ### einsum

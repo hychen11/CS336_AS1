@@ -399,3 +399,36 @@ def get_lr_cosine_schedule(
         return min_learning_rate + 0.5 * (max_learning_rate - min_learning_rate) * (1+math.cos(math.pi*((it-warmup_iters)/(cosine_cycle_iters-warmup_iters))))
     else:
         return min_learning_rate
+
+def gradient_clipping(parameters, max_l2_norm) -> None:
+    """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
+
+    Args:
+        parameters (Iterable[torch.nn.Parameter]): collection of trainable parameters.
+        max_l2_norm (float): a positive value containing the maximum l2-norm.
+
+    The gradients of the parameters (parameter.grad) should be modified in-place.
+    """
+    import math
+    eps = 1e-6
+    
+    grads = []
+    for p in parameters:
+        if p.grad is not None:
+            grads.append(p.grad)
+    
+    if not grads:
+        return
+    
+    norm = 0.0
+
+    for g in grads:
+        tmp = g.data.norm(dtype=torch.float32) #default L2 norm
+        norm += tmp.item() ** 2
+    norm = math.sqrt(norm)
+    
+    if norm > max_l2_norm:
+        factor = max_l2_norm/(norm+eps)
+        for g in grads:
+            g.mul_(factor)
+    
