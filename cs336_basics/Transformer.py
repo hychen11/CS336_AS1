@@ -5,6 +5,7 @@ from collections import Counter, deque
 from torch import nn
 import torch
 import einops
+import numpy as np
 
 '''
 @Author: hychen11
@@ -432,3 +433,28 @@ def gradient_clipping(parameters, max_l2_norm) -> None:
         for g in grads:
             g.mul_(factor)
     
+
+"""
+this function is to 
+we have batch_size sequences, each of length context_length
+([x0, x1, x2, ..., x_{context_length-1}], [x1, x2, x3, ..., x_{context_length}])
+is one batch pair
+
+
+np.random.randint(low, high, size) 会生成一个 [low, high) 区间内的随机整数数组，长度是 size。
+"""
+def get_batch(dataset: torch.Tensor, batch_size: int, context_length: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
+    max_index = len(dataset) - context_length
+    start_indices = np.random.randint(0,max_index,size = batch_size)
+    
+    input_sequence = np.zeros((batch_size, context_length), dtype=np.int64)
+    output_sequence = np.zeros((batch_size, context_length), dtype=np.int64)
+    
+    for i in range(batch_size):
+        start = start_indices[i]
+        input_sequence[i] = dataset[start:start+context_length]
+        output_sequence[i] = dataset[start+1:start+context_length+1]
+    
+    input_sequence = torch.from_numpy(input_sequence).to(device)
+    output_sequence = torch.from_numpy(output_sequence).to(device)
+    return input_sequence, output_sequence
