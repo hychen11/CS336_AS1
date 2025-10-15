@@ -443,7 +443,17 @@ l2_norm = torch.norm(x, p=2)   # 默认就是 p=2
 print(l2_norm)  # tensor(5.)
 ```
 
+# Data Loader
 
+Random choose B sequences of length m
+
+we have batch_size sequences, each of length context_length
+
+$([x0, x1, x2, ..., x_{context_length-1}], [x1, x2, x3, ..., x_{context_length}])$
+
+is one batch pair
+
+# Checkpointing
 
 # einops
 

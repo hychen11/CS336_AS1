@@ -401,6 +401,7 @@ def get_lr_cosine_schedule(
     else:
         return min_learning_rate
 
+
 def gradient_clipping(parameters, max_l2_norm) -> None:
     """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
 
@@ -412,27 +413,27 @@ def gradient_clipping(parameters, max_l2_norm) -> None:
     """
     import math
     eps = 1e-6
-    
+
     grads = []
     for p in parameters:
         if p.grad is not None:
             grads.append(p.grad)
-    
+
     if not grads:
         return
-    
+
     norm = 0.0
 
     for g in grads:
-        tmp = g.data.norm(dtype=torch.float32) #default L2 norm
+        tmp = g.data.norm(dtype=torch.float32)  # default L2 norm
         norm += tmp.item() ** 2
     norm = math.sqrt(norm)
-    
+
     if norm > max_l2_norm:
         factor = max_l2_norm/(norm+eps)
         for g in grads:
             g.mul_(factor)
-    
+
 
 """
 this function is to 
@@ -443,18 +444,44 @@ is one batch pair
 
 np.random.randint(low, high, size) 会生成一个 [low, high) 区间内的随机整数数组，长度是 size。
 """
+
+
 def get_batch(dataset: torch.Tensor, batch_size: int, context_length: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
     max_index = len(dataset) - context_length
-    start_indices = np.random.randint(0,max_index,size = batch_size)
-    
+    start_indices = np.random.randint(0, max_index, size=batch_size)
+
     input_sequence = np.zeros((batch_size, context_length), dtype=np.int64)
     output_sequence = np.zeros((batch_size, context_length), dtype=np.int64)
-    
+
     for i in range(batch_size):
         start = start_indices[i]
         input_sequence[i] = dataset[start:start+context_length]
         output_sequence[i] = dataset[start+1:start+context_length+1]
-    
+
     input_sequence = torch.from_numpy(input_sequence).to(device)
     output_sequence = torch.from_numpy(output_sequence).to(device)
     return input_sequence, output_sequence
+
+
+def save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer, iteration: int, out: str):
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'iteration': iteration
+    }
+    torch.save(checkpoint, out)
+
+
+def load_checkpoint(src: str, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> int:
+    """
+    Args:
+        src (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialized checkpoint.
+        model (torch.nn.Module): Restore the state of this model.
+        optimizer (torch.optim.Optimizer): Restore the state of this optimizer.
+    Returns:
+        int: the previously-serialized number of iterations.
+    """
+    checkpoint = torch.load(src)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    return checkpoint['iteration']
