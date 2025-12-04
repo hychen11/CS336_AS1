@@ -504,3 +504,201 @@ tensor.addcdiv_(tensor1, tensor2, value=-step_size)
 # tensor=tensor+value∗(tensor1/tensor2)
 ```
 
+
+# Wandb
+
+wandb 的组织结构是两层：
+
+```
+Project
+  └── Run
+```
+
+也就是说：
+
+project = 实验项目的名字（一个文件夹）
+
+run = 一次具体训练（一个文件）
+
+举例：
+```
+Project: cs336-transformer-pretrain
+    Run: lr3e-4-seq512
+    Run: warmup-1000
+    Run: test-batch16
+```
+
+# seed
+
+一般来说设置两个seed，一个numpy，一个torch就够了，但是实际完整的seed设置如下所示，需要多个
+
+```python
+def set_all_seeds(seed: int):
+    """设置所有相关的随机种子"""
+    # 1. PyTorch
+    torch.manual_seed(seed)
+    
+    # 2. NumPy
+    np.random.seed(seed)
+    
+    # 3. Python内置random模块
+    import random
+    random.seed(seed)
+    
+    # 4. 如果有CUDA，设置CUDA的随机种子
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # 多GPU时
+        # CUDA确定性模式（会影响性能）
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    
+    # 5. 其他可能需要设置的
+    try:
+        import tensorflow as tf
+        tf.random.set_seed(seed)
+    except ImportError:
+        pass
+    
+    print(f"所有随机种子已设置为: {seed}")
+```
+
+
+# data
+
+```python
+  print(f"Loading training data finished, size: {len(training_data):,} tokens.")
+```
+ 这里的 :,是添加千位分隔符号
+
+ ```python
+ def load_data(path: str, dtype=None) -> np.memmap:  
+  # get_batch(dataset: torch.Tensor, batch_size: int, context_length: int, device: torch.device) 
+  if path.endswith('.npy'):
+    mmap_data = np.load(path, mmap_mode='r')
+    print(f"\t load .npy file with shape {mmap_data.shape} and dtype {mmap_data.dtype}")
+    return mmap_data
+  if dtype is None:
+    dtype = np.float32
+  # read binary file
+  
+  num_tokens = os.path.getsize(path) // np.dtype(dtype).itemsize
+  mmap_data = np.memmap(path, dtype=dtype, mode='r',shape=(num_tokens,))
+  return mmap_data
+ ```
+
+
+ # training
+ `model.train()`,  `model.eval()`  是两种不同的模式
+ ```python
+import torch.nn as nn
+
+model = nn.Sequential(
+    nn.Linear(10, 20),
+    nn.Dropout(p=0.5),      # 受 train()/eval() 影响
+    nn.ReLU(),
+    nn.BatchNorm1d(20),     # 受 train()/eval() 影响
+    nn.Linear(20, 1)
+)
+
+print("初始模式:", model.training)  # 默认 True
+
+# 切换到训练模式
+model.train()
+print("训练模式:", model.training)  # True
+
+# 切换到评估模式
+model.eval()
+print("评估模式:", model.training)  # False  
+ ```
+            model.train()           model.eval()
+ Dropout	随机丢弃神经元（防过拟合）	不丢弃，所有神经元激活
+BatchNorm	使用批次统计（均值/方差）	使用训练累积的运行统计
+
+#### 场景1：训练阶段
+```
+model.train()                    # Dropout/BatchNorm 启用
+for param in model.parameters():
+    param.requires_grad = True   # 需要计算梯度
+```
+
+#### 场景2：评估阶段
+```
+model.eval()                     # Dropout/BatchNorm 禁用
+for param in model.parameters():
+    param.requires_grad = False  # 不需要梯度（节省内存）
+```
+
+#### 场景3：特征提取（微调）
+```
+model.eval()                     # Dropout/BatchNorm 禁用
+for param in model.parameters():
+    param.requires_grad = False  # 冻结大部分参数
+```
+
+#### 只解冻最后几层
+```
+for param in model.fc.parameters():
+    param.requires_grad = True
+```
+## whole process
+```python
+你的训练脚本结构非常规范，基本满足一个语言模型完整训练 loop 所需：
+
+训练/验证数据加载 ✔
+
+动态 vocab 修正 ✔
+
+模型初始化 ✔
+
+AdamW 优化器 ✔
+
+Cosine LR schedule ✔
+
+memmap dataset ✔
+
+validation ✔
+
+checkpoint ✔
+
+gradient clipping ✔
+
+hyperparameters 保存 ✔
+
+参数统计 ✔
+```
+
+# Metric
+norm 是用来观察梯度的!!
+
+* 梯度消失：norm → 0（训练停滞）
+
+* 梯度爆炸：norm → 非常大（训练不稳定）
+
+* 正常训练：norm 在合理范围内波动
+
+```python
+total_norm = 0.0
+for p in model.parameters():
+    if p.grad is not None:
+        param_norm = p.grad.data.norm(2)
+        toal_norm += param_norm.item() ** 2
+total_norm = total_norm ** 0.5
+```
+
+# import path
+
+
+```python
+# 因为Python只在sys.path中的目录里查找模块
+# 默认sys.path包含：
+# 1. 当前工作目录（运行python的目录）
+# 2. Python安装的标准库路径
+# 3. 环境变量PYTHONPATH中的路径
+
+import sys
+# 添加当前文件所在目录到模块搜索路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+```
+
