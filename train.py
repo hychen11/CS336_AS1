@@ -10,7 +10,6 @@
 '''
 
 import argparse
-from ast import parse
 import math
 import time
 import os
@@ -25,7 +24,7 @@ import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
-
+from experiment_tracker import ExperimentTracker
 from cs336_basics.Transformer import(
     TransformerLm,
     cross_entropy,
@@ -57,7 +56,12 @@ def main():
   
   # set up experiment logging
   # TODO: implement experiment logging setup
-
+  experiment_tracker = ExperimentTracker(experiment_name=args.experiment_name, log_dir=args.experiment_log_dir, config=vars(args), use_wandb=not args.no_wandb, wandb_project=args.wandb_project)
+  # Log experiment start
+  experiment_tracker.log_note(f"Starting training with {args.num_layers} layers, "
+                              f"{args.d_model} hidden dimensions, and "
+                              f"{args.num_heads} attention heads.")
+  
   # load data
   print(f"Loading training data from {args.data_path}...")
   training_data = load_data(args.data_path)
@@ -157,13 +161,27 @@ def main():
       val_loss = compute_validation_loss(model, validation_data, args.eval_iters, args.batch_size, args.context_length, device)
       val_perplexity = math.exp(val_loss)
       print(f"Interation {iter_num}: validation loss = {val_loss:.4f}, perplexity = {val_perplexity:.4f}")
+      experiment_tracker.log_metrics({
+          'val_loss': val_loss,
+          'val_perplexity': val_perplexity
+      }, step=iter_num)
     
     # step2: checkpointing
     if iter_num > 0 and iter_num % args.checkpoint_interval == 0:
       checkpoint_path = os.path.join(args.checkpoint_path, f"checkpoint_iter_{iter_num}.pth")
       save_checkpoint(model, optimizer, iter_num, checkpoint_path)
       print(f"Saved checkpoint at iteration {iter_num} to {checkpoint_path}") 
-         
+      # Log checkpoint info
+      checkpoint_metrics = {
+          'train_loss': loss.item(),
+          'learning_rate': lr
+      }
+      # Add validation loss if available
+      if iter_num % args.eval_interval == 0:
+          checkpoint_metrics['val_loss'] = val_loss
+          checkpoint_metrics['val_perplexity'] = val_perplexity
+      experiment_tracker.save_checkpoint_info(checkpoint_path, iter_num, checkpoint_metrics)
+                
     # step3: logging
     if iter_num % args.log_interval == 0:    
       elapsed = time.time() - start_time
@@ -183,18 +201,30 @@ def main():
       total_norm = torch.norm(torch.stack([p.grad.norm() for p in model.parameters() if p.grad is not None]))
       print(f"Iteration {iter_num}: training loss = {loss.item():.4f}, lr = {lr:.6e}, time per iter = {iters_per_sec:.4f}s, grad norm = {total_norm:.4f}")
     
-    # TODO: add experiment tracking
-    
+      # TODO: add experiment tracking
+      experiment_tracker.log_metrics({
+          'train_loss': loss.item(),
+          'learning_rate': lr,
+          'grad_norm': total_norm,
+          'iter_per_sec': iters_per_sec
+      }, step=iter_num)
    # final validation
   final_loss = compute_validation_loss(model, validation_data, args.eval_iters, args.batch_size, args.context_length, device)
   final_perplexity = math.exp(final_loss)
   print(f"Final validation loss = {final_loss:.4f}, Final perplexity = {final_perplexity:.4f}")
-      
   # final checkpoint
   final_path = os.path.join(args.checkpoint_path, f"checkpoint_final.pth")
   save_checkpoint(model, optimizer, args.max_iters, final_path)
   print(f"Training completed. Final checkpoint saved to {final_path}")
   
+  # Log final metrics
+  experiment_tracker.log_metrics({
+      'final_val_loss': final_loss,
+      'final_val_perplexity': final_perplexity
+  }, step=args.max_iters)
+  
+  # Close experiment tracker
+  experiment_tracker.close()
   
     
     
@@ -217,6 +247,7 @@ def get_parameters_count(model: nn.Module) -> int:
   return sum(p.numel() for p in model.parameters())  
 
 def setup_seed(seed):
+    torch.cuda.manual_seed_all(seed)
     torch.manual_seed(seed)
     np.random.seed(seed)
     torch.backends.cudnn.deterministic = True
